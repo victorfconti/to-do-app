@@ -3,7 +3,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
 use gtk::{CompositeTemplate, Entry, ListView};
-// use once_cell::sync::OnceCell;
+use gtk::glib::once_cell::sync::OnceCell;
 
 // Object holding the state
 #[derive(CompositeTemplate, Default)]
@@ -13,7 +13,7 @@ pub struct Window {
     pub entry: TemplateChild<Entry>,
     #[template_child]
     pub list_view: TemplateChild<ListView>,
-    // pub model: OnceCell<gio::ListStore>,
+    pub model: OnceCell<gio::ListStore>,
 }
 
 // The central trait for subclassing a GObject
@@ -40,9 +40,9 @@ impl ObjectImpl for Window {
         self.parent_constructed(obj);
 
         // // Setup
-        // obj.setup_model();
-        // obj.setup_callbacks();
-        // obj.setup_factory();
+        obj.setup_model();
+        obj.setup_callbacks();
+        obj.setup_factory();
     }
 }
 

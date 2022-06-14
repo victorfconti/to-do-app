@@ -1,3 +1,5 @@
+mod todo_object;
+mod todo_row;
 mod window;
 
 use window::Window;
