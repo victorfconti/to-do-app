@@ -1,12 +1,16 @@
 mod imp;
 
-use crate::todo_object::TodoObject;
+use std::fs::File;
+
+use crate::todo_object::{TodoData, TodoObject};
 use crate::todo_row::TodoRow;
+use crate::utils::data_path;
 use glib::{clone, Object};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
-use gtk::{Application, NoSelection, SignalListItemFactory};
+use gtk::{Application, CustomFilter, FilterListModel, NoSelection, SignalListItemFactory};
+use log::info;
 
 glib::wrapper! {
     pub struct Window(ObjectSubclass<imp::Window>)
@@ -27,6 +31,42 @@ impl Window {
         imp.model.get().expect("Could not get model")
     }
 
+    fn filter(&self) -> Option<CustomFilter> {
+        // Get state
+        let imp = self.imp();
+
+        // Get filter_state from settings
+        let filter_state: String = imp.settings.get("filter");
+
+        // Create custom filters
+        let filter_open = CustomFilter::new(|obj| {
+            // Get `TodoObject` from `glib::Object`
+            let todo_object = obj
+                .downcast_ref::<TodoObject>()
+                .expect("The object needs to be of type `TodoObject`.");
+
+            // Only allow completed tasks
+            !todo_object.is_completed()
+        });
+        let filter_done = CustomFilter::new(|obj| {
+            // Get `TodoObject` from `glib::Object`
+            let todo_object = obj
+                .downcast_ref::<TodoObject>()
+                .expect("The object needs to be of type `TodoObject`.");
+
+            // Only allow done tasks
+            todo_object.is_completed()
+        });
+
+        // Return the correct filter
+        match filter_state.as_str() {
+            "All" => None,
+            "Open" => Some(filter_open),
+            "Done" => Some(filter_done),
+            _ => unreachable!(),
+        }
+    }
+
     fn setup_model(&self) {
         // Create new model
         let model = gio::ListStore::new(TodoObject::static_type());
@@ -35,9 +75,37 @@ impl Window {
         let imp = self.imp();
         imp.model.set(model).expect("Could not set model");
 
-        // Wrap model with selection and pass it to the list view
-        let selection_model = NoSelection::new(Some(self.model()));
+        // Wrap model with filter and selection and pass it to the list view
+        let filter_model = FilterListModel::new(Some(self.model()), self.filter().as_ref());
+        let selection_model = NoSelection::new(Some(&filter_model));
         imp.list_view.set_model(Some(&selection_model));
+
+        // Filter model whenever the value of the key "filter" changes
+        imp.settings.connect_changed(
+            Some("filter"),
+            clone!(@weak self as window, @weak filter_model => move |_, _| {
+                filter_model.set_filter(window.filter().as_ref());
+            }),
+        );
+    }
+
+    fn restore_data(&self) {
+        if let Ok(file) = File::open(data_path()) {
+            // Deserialize data from file to vector
+            let backup_data: Vec<TodoData> =
+                serde_json::from_reader(file).expect("Could not get backup data from json file.");
+
+            // Convert `Vec<TodoData>` to `Vec<TodoObject>`
+            let todo_objects: Vec<TodoObject> = backup_data
+                .into_iter()
+                .map(|todo_data| TodoObject::new(todo_data.completed, todo_data.content))
+                .collect();
+
+            // Insert restored objects into model
+            self.model().splice(0, 0, &todo_objects);
+        } else {
+            info!("Backup file does not exist yet {:?}", data_path());
+        }
     }
 
     fn setup_callbacks(&self) {
@@ -54,6 +122,25 @@ impl Window {
                 let todo_object = TodoObject::new(false, content);
                 model.append(&todo_object);
                 buffer.set_text("");
+            }));
+
+        // Setup callback so that click on the clear_button
+        // removes all done tasks
+        imp.clear_button
+            .connect_clicked(clone!(@weak model => move |_| {
+                let mut position = 0;
+                while let Some(item) = model.item(position) {
+                    // Get `TodoObject` from `glib::Object`
+                    let todo_object = item
+                        .downcast_ref::<TodoObject>()
+                        .expect("The object needs to be of type `TodoObject`.");
+
+                    if todo_object.is_completed() {
+                        model.remove(position);
+                    } else {
+                        position += 1;
+                    }
+                }
             }));
     }
 
@@ -103,4 +190,28 @@ impl Window {
         let imp = self.imp();
         imp.list_view.set_factory(Some(&factory));
     }
+
+    fn setup_shortcut_window(&self) {
+        // Get `ShortcutsWindow` via `gtk::Builder`
+        let builder = gtk::Builder::from_string(include_str!("shortcuts.ui"));
+        let shortcuts = builder
+            .object("shortcuts")
+            .expect("Could not get object `shortcuts` from builder.");
+
+        // After calling this method,
+        // calling the action "win.show-help-overlay" will show the shortcut window
+        self.set_help_overlay(Some(&shortcuts));
+    }
+
+    fn setup_filter_action(&self) {
+        // Get state
+        let imp = self.imp();
+
+        // Create action from key "filter"
+        let filter_action = imp.settings.create_action("filter");
+
+        // Add action "filter" to action group "win"
+        self.add_action(&filter_action);
+    }
+
 }

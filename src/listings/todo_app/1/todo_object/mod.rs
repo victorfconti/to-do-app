@@ -1,7 +1,10 @@
 mod imp;
 
-use gtk::glib;
 use glib::Object;
+use gtk::glib;
+use gtk::subclass::prelude::*;
+use serde::{Deserialize, Serialize};
+
 
 glib::wrapper! {
     pub struct TodoObject(ObjectSubclass<imp::TodoObject>);
@@ -12,9 +15,19 @@ impl TodoObject {
         Object::new(&[("completed", &completed), ("content", &content)])
             .expect("Failed to create `TodoObject`.")
     }
+
+    pub fn is_completed(&self) -> bool {
+        let imp = self.imp();
+        imp.data.borrow().completed
+    }
+
+    pub fn todo_data(&self) -> TodoData {
+        let imp = self.imp();
+        imp.data.borrow().clone()
+    }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize, Clone)]
 pub struct TodoData {
     pub completed: bool,
     pub content: String,
